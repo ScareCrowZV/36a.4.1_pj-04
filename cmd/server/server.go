@@ -26,6 +26,7 @@ func main() {
 	go startRSSParser(db, config)
 
 	apiServer := api.New(db)
+
 	log.Println("Server starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", apiServer.Router()))
 }
