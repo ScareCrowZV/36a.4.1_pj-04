@@ -27,6 +27,51 @@ func (m *MockStorage) GetLastPosts(n int) ([]models.Post, error) {
 	return m.posts[:n], nil
 }
 
+func (m *MockStorage) GetPostsWithPagination(page, pageSize int, search string) ([]models.Post, int, error) {
+	if m.err != nil {
+		return nil, 0, m.err
+	}
+
+	offset := (page - 1) * pageSize
+
+	var filteredPosts []models.Post
+	if search != "" {
+		for _, p := range m.posts {
+			if contains(p.Title, search) || contains(p.Content, search) {
+				filteredPosts = append(filteredPosts, p)
+			}
+		}
+	} else {
+		filteredPosts = m.posts
+	}
+
+	total := len(filteredPosts)
+
+	start := offset
+	end := offset + pageSize
+	if start > total {
+		return []models.Post{}, total, nil
+	}
+	if end > total {
+		end = total
+	}
+
+	return filteredPosts[start:end], total, nil
+}
+
+func contains(s, substr string) bool {
+	return len(substr) == 0 || len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *MockStorage) SavePosts(posts []models.Post) error {
 	return nil
 }
@@ -224,6 +269,42 @@ func TestIndexMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestGetNewsAPI(t *testing.T) {
+	mockStorage := &MockStorage{
+		posts: []models.Post{
+			{ID: 1, Title: "News 1", Content: "Content 1", PubTime: 1640995200, Link: "https://example.com/1"},
+			{ID: 2, Title: "News 2", Content: "Content 2", PubTime: 1640995201, Link: "https://example.com/2"},
+			{ID: 3, Title: "Security News", Content: "Security content", PubTime: 1640995202, Link: "https://example.com/3"},
+		},
+	}
+	api := New(mockStorage)
+
+	tests := []struct {
+		name           string
+		path           string
+		expectedStatus int
+	}{
+		{"без параметров", "/api/news", http.StatusOK},
+		{"с пагинацией", "/api/news?page=1", http.StatusOK},
+		{"с поиском", "/api/news?s=Security", http.StatusOK},
+		{"с пагинацией и поиском", "/api/news?page=1&s=News", http.StatusOK},
+		{"неверная страница", "/api/news?page=abc", http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.path, nil)
+			w := httptest.NewRecorder()
+
+			api.getNewsAPI(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Ожидался статус %d, получен %d", tt.expectedStatus, w.Code)
+			}
+		})
+	}
+}
+
 func TestRouter(t *testing.T) {
 	setupTestTemplate(t)
 	defer cleanupTestTemplate(t)
@@ -247,7 +328,8 @@ func TestRouter(t *testing.T) {
 		wantStatus int
 	}{
 		{"главная страница", "/", "GET", http.StatusOK},
-		{"API новостей", "/news/5", "GET", http.StatusOK},
+		{"API новостей старый", "/news/5", "GET", http.StatusOK},
+		{"API новостей новый", "/api/news", "GET", http.StatusOK},
 		{"неверный путь", "/invalid", "GET", http.StatusNotFound},
 	}
 
